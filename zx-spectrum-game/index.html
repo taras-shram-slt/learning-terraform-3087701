@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZX Spectrum Invaders</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: monospace;
+  }
+  #spectrum-border {
+    background: #000080;
+    padding: 24px 32px;
+    border: 4px solid #000;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  #info {
+    color: #aaa;
+    font-size: 12px;
+    margin-top: 10px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="spectrum-border">
+  <canvas id="screen" width="256" height="192"></canvas>
+</div>
+<div id="info">Arrow keys / Z X to move &nbsp;|&nbsp; Space to fire &nbsp;|&nbsp; Enter to start</div>
+
+<script>
+// ZX Spectrum colour palette (normal + bright)
+const COLORS = [
+  '#000000', // 0 black
+  '#0000C0', // 1 blue
+  '#C00000', // 2 red
+  '#C000C0', // 3 magenta
+  '#00C000', // 4 green
+  '#00C0C0', // 5 cyan
+  '#C0C000', // 6 yellow
+  '#C0C0C0', // 7 white
+  '#000000', // 8 bright black
+  '#0000FF', // 9 bright blue
+  '#FF0000', // 10 bright red
+  '#FF00FF', // 11 bright magenta
+  '#00FF00', // 12 bright green
+  '#00FFFF', // 13 bright cyan
+  '#FFFF00', // 14 bright yellow
+  '#FFFFFF', // 15 bright white
+];
+
+const INK = {
+  BLACK: 0, BLUE: 1, RED: 2, MAGENTA: 3,
+  GREEN: 4, CYAN: 5, YELLOW: 6, WHITE: 7,
+};
+
+const canvas = document.getElementById('screen');
+const ctx = canvas.getContext('2d');
+
+// Scale 2x for comfortable play while keeping spectrum feel
+const SCALE = 2;
+canvas.width = 256 * SCALE;
+canvas.height = 192 * SCALE;
+ctx.imageSmoothingEnabled = false;
+
+// -------- ZX Spectrum character cell renderer --------
+// The Spectrum screen is 32x24 character cells of 8x8 pixels each.
+// We replicate using a tiny bitmap font.
+
+const FONT = {
+  ' ': [0,0,0,0,0,0,0,0],
+  '0': [0x3C,0x66,0x6E,0x7E,0x76,0x66,0x3C,0],
+  '1': [0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0],
+  '2': [0x3C,0x66,0x06,0x1C,0x30,0x66,0x7E,0],
+  '3': [0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0],
+  '4': [0x0E,0x1E,0x36,0x66,0x7F,0x06,0x06,0],
+  '5': [0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0],
+  '6': [0x1C,0x30,0x60,0x7C,0x66,0x66,0x3C,0],
+  '7': [0x7E,0x66,0x0C,0x18,0x18,0x18,0x18,0],
+  '8': [0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0],
+  '9': [0x3C,0x66,0x66,0x3E,0x06,0x0C,0x38,0],
+  'A': [0x18,0x3C,0x66,0x7E,0x66,0x66,0x66,0],
+  'B': [0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0],
+  'C': [0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0],
+  'D': [0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0],
+  'E': [0x7E,0x60,0x60,0x7C,0x60,0x60,0x7E,0],
+  'F': [0x7E,0x60,0x60,0x7C,0x60,0x60,0x60,0],
+  'G': [0x3C,0x66,0x60,0x6E,0x66,0x66,0x3C,0],
+  'H': [0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0],
+  'I': [0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0],
+  'J': [0x1E,0x0C,0x0C,0x0C,0x6C,0x6C,0x38,0],
+  'K': [0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0],
+  'L': [0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0],
+  'M': [0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0],
+  'N': [0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0],
+  'O': [0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0],
+  'P': [0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0],
+  'Q': [0x3C,0x66,0x66,0x66,0x66,0x3C,0x0E,0],
+  'R': [0x7C,0x66,0x66,0x7C,0x78,0x6C,0x66,0],
+  'S': [0x3C,0x66,0x60,0x3C,0x06,0x66,0x3C,0],
+  'T': [0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0],
+  'U': [0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0],
+  'V': [0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0],
+  'W': [0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0],
+  'X': [0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0],
+  'Y': [0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0],
+  'Z': [0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0],
+  '-': [0,0,0,0x7E,0,0,0,0],
+  ':': [0,0x18,0x18,0,0x18,0x18,0,0],
+  '!': [0x18,0x18,0x18,0x18,0,0x18,0x18,0],
+  '>': [0x60,0x30,0x18,0x0C,0x18,0x30,0x60,0],
+  '<': [0x06,0x0C,0x18,0x30,0x18,0x0C,0x06,0],
+};
+
+function drawChar(ch, cx, cy, inkColor, paperColor) {
+  const bits = FONT[ch] || FONT[' '];
+  const px = cx * 8 * SCALE;
+  const py = cy * 8 * SCALE;
+  // paper
+  ctx.fillStyle = COLORS[paperColor];
+  ctx.fillRect(px, py, 8 * SCALE, 8 * SCALE);
+  // ink
+  ctx.fillStyle = COLORS[inkColor];
+  for (let row = 0; row < 8; row++) {
+    const byte = bits[row];
+    for (let col = 0; col < 8; col++) {
+      if (byte & (0x80 >> col)) {
+        ctx.fillRect(px + col * SCALE, py + row * SCALE, SCALE, SCALE);
+      }
+    }
+  }
+}
+
+function drawText(text, cx, cy, inkColor, paperColor) {
+  for (let i = 0; i < text.length; i++) {
+    drawChar(text[i].toUpperCase(), cx + i, cy, inkColor, paperColor);
+  }
+}
+
+function clearScreen(paperColor) {
+  ctx.fillStyle = COLORS[paperColor];
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// -------- Sprite drawing (pixel art at 2x ZX scale = 4px per "pixel") --------
+// Sprites use a 4x4 "macro pixel" = 1 sprite pixel
+
+function drawSprite(sprite, sx, sy, color) {
+  ctx.fillStyle = COLORS[color];
+  for (let r = 0; r < sprite.length; r++) {
+    const row = sprite[r];
+    for (let c = 0; c < row.length; c++) {
+      if (row[c]) {
+        ctx.fillRect(
+          (sx + c) * SCALE,
+          (sy + r) * SCALE,
+          SCALE, SCALE
+        );
+      }
+    }
+  }
+}
+
+// -------- Game sprites (8x8 pixel art) --------
+const SPRITE_INVADER_A = [
+  [0,0,1,0,0,0,1,0],
+  [0,0,0,1,0,1,0,0],
+  [0,0,1,1,1,1,1,0],
+  [0,1,1,0,1,0,1,1],
+  [1,1,1,1,1,1,1,1],
+  [1,0,1,1,1,1,0,1],
+  [1,0,1,0,0,1,0,1],
+  [0,0,0,1,1,0,0,0],
+];
+
+const SPRITE_INVADER_B = [
+  [0,0,1,0,0,0,1,0],
+  [1,0,0,1,0,1,0,1],
+  [1,0,1,1,1,1,0,1],
+  [1,1,1,0,0,1,1,1],
+  [1,1,1,1,1,1,1,1],
+  [0,1,1,1,1,1,1,0],
+  [0,0,1,0,0,1,0,0],
+  [0,1,0,0,0,0,1,0],
+];
+
+const SPRITE_PLAYER = [
+  [0,0,0,0,1,0,0,0,0],
+  [0,0,0,1,1,1,0,0,0],
+  [0,0,0,1,1,1,0,0,0],
+  [0,1,1,1,1,1,1,1,0],
+  [1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,1],
+];
+
+const SPRITE_BUNKER = [
+  [0,0,1,1,1,1,1,1,1,1,1,0,0],
+  [0,1,1,1,1,1,1,1,1,1,1,1,0],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,1,1,0,0,0,0,0,0,0,1,1,1],
+  [1,1,0,0,0,0,0,0,0,0,0,1,1],
+];
+
+const SPRITE_UFO = [
+  [0,0,1,1,1,1,1,1,0,0],
+  [0,1,1,1,1,1,1,1,1,0],
+  [1,0,1,0,1,0,1,0,1,1],
+  [1,1,1,1,1,1,1,1,1,1],
+  [0,1,0,1,0,1,0,1,0,0],
+];
+
+const SPRITE_EXPLOSION = [
+  [1,0,0,0,1,0,0,0,1],
+  [0,1,0,0,0,0,0,1,0],
+  [0,0,1,0,0,0,1,0,0],
+  [1,0,0,0,0,0,0,0,1],
+  [0,0,0,0,0,0,0,0,0],
+  [1,0,0,0,0,0,0,0,1],
+  [0,0,1,0,0,0,1,0,0],
+  [0,1,0,0,0,0,0,1,0],
+  [1,0,0,0,1,0,0,0,1],
+];
+
+// -------- Game state --------
+const SCREEN_W = 256;
+const SCREEN_H = 192;
+
+const INVADER_COLS = 10;
+const INVADER_ROWS = 4;
+const INVADER_W = 12;
+const INVADER_H = 10;
+const INVADER_H_GAP = 4;
+const INVADER_V_GAP = 4;
+
+let state = 'title'; // 'title' | 'playing' | 'gameover' | 'win'
+let score, lives, level;
+let player;
+let bullets; // player bullets
+let invaders;
+let invaderDir, invaderDropTimer, invaderMoveTimer, invaderMoveDelay;
+let bombs; // invader bombs
+let bunkers;
+let ufo;
+let ufoTimer;
+let explosions;
+let flashTimer;
+let animFrame;
+let flashState;
+let gameLoopId;
+let lastTime;
+
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.code] = true; });
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+function wasPressed(code) {
+  if (keys[code]) { keys[code] = false; return true; }
+  return false;
+}
+
+function initGame() {
+  score = 0;
+  lives = 3;
+  level = 1;
+  startLevel();
+}
+
+function startLevel() {
+  player = { x: 120, y: 168, w: 9, h: 8, shootCooldown: 0 };
+  bullets = [];
+  bombs = [];
+  explosions = [];
+  flashTimer = 0;
+  flashState = false;
+  animFrame = 0;
+  ufoTimer = 600 + Math.random() * 400;
+  ufo = null;
+
+  invaderDir = 1;
+  invaderMoveDelay = Math.max(4, 30 - level * 3);
+  invaderMoveTimer = invaderMoveDelay;
+  invaderDropTimer = 0;
+
+  invaders = [];
+  const startX = 16;
+  const startY = 24;
+  for (let row = 0; row < INVADER_ROWS; row++) {
+    for (let col = 0; col < INVADER_COLS; col++) {
+      const colors = [INK.RED+8, INK.YELLOW+8, INK.CYAN+8, INK.GREEN+8];
+      invaders.push({
+        x: startX + col * (INVADER_W + INVADER_H_GAP),
+        y: startY + row * (INVADER_H + INVADER_V_GAP),
+        alive: true,
+        frame: 0,
+        color: colors[row % colors.length],
+        points: (INVADER_ROWS - row) * 10,
+      });
+    }
+  }
+
+  // 4 bunkers
+  bunkers = [];
+  const bunkerY = 148;
+  const bunkerSpacing = 52;
+  const bunkerStartX = 14;
+  for (let b = 0; b < 4; b++) {
+    const bx = bunkerStartX + b * bunkerSpacing;
+    const pixels = [];
+    for (let r = 0; r < SPRITE_BUNKER.length; r++) {
+      pixels.push([...SPRITE_BUNKER[r]]);
+    }
+    bunkers.push({ x: bx, y: bunkerY, pixels });
+  }
+}
+
+function aliveCount() {
+  return invaders.filter(i => i.alive).length;
+}
+
+function lowestAliveRow() {
+  let maxY = -Infinity;
+  for (const inv of invaders) {
+    if (inv.alive && inv.y + INVADER_H > maxY) maxY = inv.y + INVADER_H;
+  }
+  return maxY;
+}
+
+function update(dt) {
+  if (state === 'title') {
+    if (wasPressed('Enter') || wasPressed('Space')) {
+      state = 'playing';
+      initGame();
+    }
+    return;
+  }
+
+  if (state === 'gameover' || state === 'win') {
+    if (wasPressed('Enter') || wasPressed('Space')) {
+      state = 'title';
+    }
+    return;
+  }
+
+  // --- Player movement ---
+  if ((keys['ArrowLeft'] || keys['KeyZ']) && player.x > 2) player.x -= 2;
+  if ((keys['ArrowRight'] || keys['KeyX']) && player.x < SCREEN_W - player.w - 2) player.x += 2;
+
+  // --- Player shoot ---
+  if (player.shootCooldown > 0) player.shootCooldown--;
+  if ((wasPressed('Space') || wasPressed('ArrowUp')) && player.shootCooldown === 0 && bullets.filter(b => b.fromPlayer).length < 2) {
+    bullets.push({ x: player.x + 4, y: player.y - 2, vy: -4, fromPlayer: true });
+    player.shootCooldown = 15;
+  }
+
+  // --- Invader march ---
+  invaderMoveTimer--;
+  animFrame = (animFrame + 1) % 2;
+
+  if (invaderMoveTimer <= 0) {
+    const alive = invaders.filter(i => i.alive);
+    const speed = Math.max(1, 30 - level * 3);
+    invaderMoveTimer = Math.max(2, Math.round(speed * alive.length / (INVADER_COLS * INVADER_ROWS)));
+
+    let hitWall = false;
+    for (const inv of alive) {
+      const nx = inv.x + invaderDir * 2;
+      if (nx < 2 || nx + INVADER_W > SCREEN_W - 2) { hitWall = true; break; }
+    }
+
+    if (hitWall) {
+      invaderDir *= -1;
+      for (const inv of alive) inv.y += 4;
+    } else {
+      for (const inv of alive) inv.x += invaderDir * 2;
+    }
+    for (const inv of alive) inv.frame = (inv.frame + 1) % 2;
+  }
+
+  // --- Invader bombs ---
+  if (Math.random() < 0.008 + level * 0.002) {
+    const alive = invaders.filter(i => i.alive);
+    if (alive.length > 0) {
+      const shooter = alive[Math.floor(Math.random() * alive.length)];
+      bombs.push({ x: shooter.x + 4, y: shooter.y + INVADER_H, vy: 2 + level * 0.3 });
+    }
+  }
+  for (const bomb of bombs) bomb.y += bomb.vy;
+
+  // --- UFO ---
+  ufoTimer--;
+  if (ufoTimer <= 0 && !ufo) {
+    ufo = { x: -10, y: 14, vx: 1.5, w: 10, h: 5 };
+    ufoTimer = 700 + Math.random() * 500;
+  }
+  if (ufo) {
+    ufo.x += ufo.vx;
+    if (ufo.x > SCREEN_W + 12) ufo = null;
+  }
+
+  // --- Move bullets ---
+  for (const b of bullets) b.y += b.vy;
+
+  // --- Bullet vs invader ---
+  for (const b of bullets.filter(b => b.fromPlayer)) {
+    for (const inv of invaders.filter(i => i.alive)) {
+      if (b.x >= inv.x && b.x <= inv.x + INVADER_W &&
+          b.y >= inv.y && b.y <= inv.y + INVADER_H) {
+        inv.alive = false;
+        b.dead = true;
+        score += inv.points;
+        explosions.push({ x: inv.x, y: inv.y, timer: 20 });
+      }
+    }
+  }
+
+  // --- Bullet vs UFO ---
+  if (ufo) {
+    for (const b of bullets.filter(b => b.fromPlayer)) {
+      if (b.x >= ufo.x && b.x <= ufo.x + ufo.w &&
+          b.y >= ufo.y && b.y <= ufo.y + ufo.h) {
+        score += 100 + Math.floor(Math.random() * 5) * 50;
+        explosions.push({ x: ufo.x, y: ufo.y, timer: 25 });
+        ufo = null;
+        b.dead = true;
+        break;
+      }
+    }
+  }
+
+  // --- Bullet vs bunker ---
+  for (const b of bullets) {
+    for (const bunk of bunkers) {
+      const lx = b.x - bunk.x;
+      const ly = b.y - bunk.y;
+      if (lx >= 0 && lx < SPRITE_BUNKER[0].length &&
+          ly >= 0 && ly < SPRITE_BUNKER.length) {
+        if (bunk.pixels[Math.floor(ly)] && bunk.pixels[Math.floor(ly)][Math.floor(lx)]) {
+          bunk.pixels[Math.floor(ly)][Math.floor(lx)] = 0;
+          b.dead = true;
+          // Blast radius
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = Math.floor(ly) + dr;
+              const nc = Math.floor(lx) + dc;
+              if (nr >= 0 && nr < bunk.pixels.length && nc >= 0 && nc < bunk.pixels[0].length) {
+                if (Math.random() < 0.6) bunk.pixels[nr][nc] = 0;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // --- Bomb vs player ---
+  for (const bomb of bombs) {
+    if (bomb.x >= player.x - 1 && bomb.x <= player.x + player.w + 1 &&
+        bomb.y >= player.y && bomb.y <= player.y + player.h) {
+      lives--;
+      bomb.dead = true;
+      explosions.push({ x: player.x, y: player.y, timer: 40 });
+      if (lives <= 0) {
+        state = 'gameover';
+        return;
+      }
+      player.x = 120;
+    }
+  }
+
+  // --- Bomb vs bunker (same as bullet) ---
+  for (const bomb of bombs) {
+    for (const bunk of bunkers) {
+      const lx = bomb.x - bunk.x;
+      const ly = bomb.y - bunk.y;
+      if (lx >= 0 && lx < SPRITE_BUNKER[0].length &&
+          ly >= 0 && ly < SPRITE_BUNKER.length) {
+        if (bunk.pixels[Math.floor(ly)] && bunk.pixels[Math.floor(ly)][Math.floor(lx)]) {
+          bunk.pixels[Math.floor(ly)][Math.floor(lx)] = 0;
+          bomb.dead = true;
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              const nr = Math.floor(ly) + dr;
+              const nc = Math.floor(lx) + dc;
+              if (nr >= 0 && nr < bunk.pixels.length && nc >= 0 && nc < bunk.pixels[0].length) {
+                if (Math.random() < 0.5) bunk.pixels[nr][nc] = 0;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // --- Invaders reached bottom ---
+  if (lowestAliveRow() >= player.y) {
+    state = 'gameover';
+    return;
+  }
+
+  // --- Cleanup dead ---
+  bullets = bullets.filter(b => !b.dead && b.y > 0 && b.y < SCREEN_H);
+  bombs = bombs.filter(b => !b.dead && b.y < SCREEN_H);
+  explosions = explosions.filter(e => { e.timer--; return e.timer > 0; });
+
+  // --- Win condition ---
+  if (aliveCount() === 0) {
+    level++;
+    if (level > 5) {
+      state = 'win';
+    } else {
+      startLevel();
+    }
+    return;
+  }
+}
+
+function drawBunker(bunk) {
+  ctx.fillStyle = COLORS[INK.GREEN + 8];
+  for (let r = 0; r < bunk.pixels.length; r++) {
+    for (let c = 0; c < bunk.pixels[r].length; c++) {
+      if (bunk.pixels[r][c]) {
+        ctx.fillRect(
+          (bunk.x + c) * SCALE,
+          (bunk.y + r) * SCALE,
+          SCALE, SCALE
+        );
+      }
+    }
+  }
+}
+
+function render() {
+  clearScreen(INK.BLACK);
+
+  if (state === 'title') {
+    drawText('ZX SPECTRUM', 10, 4, INK.CYAN + 8, INK.BLACK);
+    drawText('INVADERS', 12, 5, INK.YELLOW + 8, INK.BLACK);
+
+    // Draw sample invaders
+    drawSprite(SPRITE_INVADER_A, 96, 60, INK.RED + 8);
+    drawSprite(SPRITE_INVADER_B, 120, 60, INK.CYAN + 8);
+    drawSprite(SPRITE_INVADER_A, 144, 60, INK.GREEN + 8);
+
+    drawText('PRESS ENTER TO START', 6, 14, INK.WHITE + 8, INK.BLACK);
+    drawText('Z X    MOVE', 10, 17, INK.YELLOW + 8, INK.BLACK);
+    drawText('SPACE  FIRE', 10, 18, INK.YELLOW + 8, INK.BLACK);
+
+    // Score table
+    drawText('10 PTS', 12, 20, INK.GREEN + 8, INK.BLACK);
+    drawText('20 PTS', 12, 21, INK.CYAN + 8, INK.BLACK);
+    drawText('30 PTS', 12, 22, INK.RED + 8, INK.BLACK);
+    return;
+  }
+
+  if (state === 'gameover') {
+    drawText('GAME OVER', 11, 9, INK.RED + 8, INK.BLACK);
+    drawText('SCORE  ' + String(score).padStart(6, '0'), 8, 12, INK.WHITE + 8, INK.BLACK);
+    drawText('PRESS ENTER', 10, 15, INK.YELLOW + 8, INK.BLACK);
+    return;
+  }
+
+  if (state === 'win') {
+    drawText('YOU WIN!', 12, 8, INK.YELLOW + 8, INK.BLACK);
+    drawText('ALL INVADERS', 10, 10, INK.CYAN + 8, INK.BLACK);
+    drawText('DEFEATED!', 11, 11, INK.CYAN + 8, INK.BLACK);
+    drawText('SCORE  ' + String(score).padStart(6, '0'), 8, 13, INK.WHITE + 8, INK.BLACK);
+    drawText('PRESS ENTER', 10, 16, INK.YELLOW + 8, INK.BLACK);
+    return;
+  }
+
+  // HUD
+  drawText('SCORE ' + String(score).padStart(6, '0'), 0, 0, INK.WHITE + 8, INK.BLACK);
+  drawText('LIVES ' + lives, 18, 0, INK.WHITE + 8, INK.BLACK);
+  drawText('LEVEL ' + level, 25, 0, INK.CYAN + 8, INK.BLACK);
+
+  // Dividing line
+  ctx.fillStyle = COLORS[INK.WHITE];
+  ctx.fillRect(0, 9 * SCALE, SCREEN_W * SCALE, SCALE);
+  ctx.fillRect(0, 178 * SCALE, SCREEN_W * SCALE, SCALE);
+
+  // UFO
+  if (ufo) {
+    drawSprite(SPRITE_UFO, ufo.x, ufo.y, INK.RED + 8);
+  }
+
+  // Invaders
+  for (const inv of invaders) {
+    if (!inv.alive) continue;
+    const sprite = inv.frame === 0 ? SPRITE_INVADER_A : SPRITE_INVADER_B;
+    drawSprite(sprite, inv.x, inv.y, inv.color);
+  }
+
+  // Bunkers
+  for (const b of bunkers) drawBunker(b);
+
+  // Player
+  drawSprite(SPRITE_PLAYER, player.x, player.y, INK.GREEN + 8);
+
+  // Bullets
+  ctx.fillStyle = COLORS[INK.WHITE + 8];
+  for (const b of bullets) {
+    ctx.fillRect(b.x * SCALE, b.y * SCALE, SCALE, SCALE * 4);
+  }
+
+  // Bombs
+  ctx.fillStyle = COLORS[INK.YELLOW + 8];
+  for (const b of bombs) {
+    ctx.fillRect(b.x * SCALE, b.y * SCALE, SCALE, SCALE * 4);
+  }
+
+  // Explosions
+  for (const ex of explosions) {
+    const flash = Math.floor(ex.timer / 4) % 2;
+    drawSprite(SPRITE_EXPLOSION, ex.x, ex.y, flash ? INK.YELLOW + 8 : INK.RED + 8);
+  }
+}
+
+function loop(ts) {
+  if (!lastTime) lastTime = ts;
+  const dt = ts - lastTime;
+  lastTime = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+state = 'title';
+render();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
